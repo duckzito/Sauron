@@ -17,6 +17,20 @@ use db::Database;
 use email::Mailer;
 use summarizer::Summarizer;
 
+/// Check whether the given PID belongs to a sauron process by inspecting
+/// the process command name via `ps`. Returns `true` only when `ps`
+/// reports a command that contains "sauron".
+fn is_sauron_process(pid: u32) -> bool {
+    std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+        .map(|output| {
+            let comm = String::from_utf8_lossy(&output.stdout);
+            comm.to_lowercase().contains("sauron")
+        })
+        .unwrap_or(false)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -37,11 +51,16 @@ async fn main() -> anyhow::Result<()> {
 
         Commands::Stop => {
             if let Some(pid) = Daemon::read_pid() {
-                unsafe {
-                    libc::kill(pid as i32, libc::SIGTERM);
+                if is_sauron_process(pid) {
+                    unsafe {
+                        libc::kill(pid as i32, libc::SIGTERM);
+                    }
+                    Daemon::remove_pid();
+                    println!("Sauron stopped (PID {})", pid);
+                } else {
+                    Daemon::remove_pid();
+                    println!("Sauron is not running (stale PID file cleaned, PID {} belongs to another process)", pid);
                 }
-                Daemon::remove_pid();
-                println!("Sauron stopped (PID {})", pid);
             } else {
                 println!("Sauron is not running");
             }
@@ -51,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
             if let Some(pid) = Daemon::read_pid() {
                 // Check if process is actually running
                 let running = unsafe { libc::kill(pid as i32, 0) == 0 };
-                if running {
+                if running && is_sauron_process(pid) {
                     println!("Sauron is running (PID {})", pid);
                     let db = Database::open(&config.db_path())?;
                     if let Some((time, _path)) = db.get_last_screenshot()? {

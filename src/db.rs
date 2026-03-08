@@ -97,7 +97,12 @@ impl Database {
         screenshot_count: i64,
     ) -> anyhow::Result<i64> {
         self.conn.execute(
-            "INSERT OR REPLACE INTO daily_summaries (summary_date, content, file_path, screenshot_count) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO daily_summaries (summary_date, content, file_path, screenshot_count) \
+             VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(summary_date) DO UPDATE SET \
+             content = excluded.content, \
+             file_path = excluded.file_path, \
+             screenshot_count = excluded.screenshot_count",
             rusqlite::params![summary_date, content, file_path, screenshot_count],
         )?;
         Ok(self.conn.last_insert_rowid())

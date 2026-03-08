@@ -40,6 +40,7 @@ impl Mailer {
 
         let resp = self.client
             .post("https://api.resend.com/emails")
+            .timeout(std::time::Duration::from_secs(30))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&body)
             .send()

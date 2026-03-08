@@ -41,7 +41,7 @@ pub struct SummaryConfig {
     pub output_dir: String,
 }
 
-#[derive(Debug, Default, Deserialize, Clone)]
+#[derive(Default, Deserialize, Clone)]
 pub struct EmailConfig {
     #[serde(default)]
     pub resend_api_key: String,
@@ -49,6 +49,24 @@ pub struct EmailConfig {
     pub from: String,
     #[serde(default)]
     pub to: String,
+}
+
+impl std::fmt::Debug for EmailConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let masked_key = if self.resend_api_key.is_empty() {
+            "not set".to_string()
+        } else if self.resend_api_key.len() >= 4 {
+            format!("***{}", &self.resend_api_key[self.resend_api_key.len() - 4..])
+        } else {
+            "***".to_string()
+        };
+
+        f.debug_struct("EmailConfig")
+            .field("resend_api_key", &masked_key)
+            .field("from", &self.from)
+            .field("to", &self.to)
+            .finish()
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]

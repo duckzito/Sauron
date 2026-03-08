@@ -79,20 +79,17 @@ impl Processor {
 
     async fn ocr_screenshot(&self, image_path: &Path) -> anyhow::Result<String> {
         // Try macOS native OCR via a swift script
-        let output = tokio::process::Command::new("swift")
-            .args([
-                "-e",
-                &format!(
-                    r#"
+        let swift_script = r#"
 import Vision
 import AppKit
 
-let url = URL(fileURLWithPath: "{}")
+let imagePath = CommandLine.arguments[1]
+let url = URL(fileURLWithPath: imagePath)
 guard let image = NSImage(contentsOf: url),
-      let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {{
+      let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
     print("ERROR: Could not load image")
     exit(1)
-}}
+}
 
 let request = VNRecognizeTextRequest()
 request.recognitionLevel = .accurate
@@ -100,13 +97,17 @@ let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
 try handler.perform([request])
 
 let text = (request.results ?? [])
-    .compactMap {{ $0.topCandidates(1).first?.string }}
+    .compactMap { $0.topCandidates(1).first?.string }
     .joined(separator: "\n")
 print(text)
-"#,
-                    image_path.display()
-                ),
-            ])
+"#;
+
+        let path_str = image_path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Image path is not valid UTF-8"))?;
+
+        let output = tokio::process::Command::new("swift")
+            .args(["-e", swift_script, path_str])
             .output()
             .await?;
 

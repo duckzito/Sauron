@@ -8,7 +8,7 @@ use crate::summarizer::Summarizer;
 use chrono::Local;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::time::{interval, Duration};
+use tokio::time::{interval_at, Duration, Instant};
 
 pub struct Daemon {
     config: Config,
@@ -51,7 +51,7 @@ impl Daemon {
         // Spawn screenshot capture loop
         let db_capture = db.clone();
         let capture_handle = tokio::spawn(async move {
-            let mut timer = interval(capture_interval);
+            let mut timer = interval_at(Instant::now() + capture_interval, capture_interval);
             loop {
                 timer.tick().await;
                 match capturer.take_screenshot() {
@@ -67,9 +67,11 @@ impl Daemon {
                                 }
                             }
                         };
+                        // Lock is dropped here before the await point
 
-                        // Process with Ollama
-                        match processor.process_screenshot(&file_path).await {
+                        // Process with Ollama (no mutex held across this await)
+                        let result = processor.process_screenshot(&file_path).await;
+                        match result {
                             Ok((summary, model, method)) => {
                                 let db = db_capture.lock().await;
                                 if let Err(e) =
@@ -153,14 +155,33 @@ impl Daemon {
                         tracing::error!("Failed to generate daily summary: {}", e);
                     }
                 }
+
+                // Sleep briefly before recalculating duration_until to avoid
+                // edge cases where we're still at the target minute
+                tokio::time::sleep(Duration::from_secs(60)).await;
             }
         });
 
-        // Wait for both tasks (runs forever)
+        // Set up signal handlers for graceful shutdown
+        let mut sigterm = tokio::signal::unix::signal(
+            tokio::signal::unix::SignalKind::terminate(),
+        )?;
+
+        // Wait for tasks or shutdown signal
         tokio::select! {
             _ = capture_handle => tracing::error!("Capture loop ended unexpectedly"),
             _ = summary_handle => tracing::error!("Summary loop ended unexpectedly"),
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("Received SIGINT, shutting down gracefully");
+            }
+            _ = sigterm.recv() => {
+                tracing::info!("Received SIGTERM, shutting down gracefully");
+            }
         }
+
+        // Clean up PID file on exit
+        Self::remove_pid();
+        tracing::info!("Sauron stopped");
 
         Ok(())
     }
