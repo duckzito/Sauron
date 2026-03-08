@@ -3,6 +3,7 @@ mod cli;
 mod config;
 mod db;
 mod error;
+mod processor;
 
 use clap::Parser;
 use cli::{Cli, Commands};
