@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub struct Config {
     #[serde(default)]
     pub capture: CaptureConfig,
@@ -41,7 +41,7 @@ pub struct SummaryConfig {
     pub output_dir: String,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Default, Deserialize, Clone)]
 pub struct EmailConfig {
     #[serde(default)]
     pub resend_api_key: String,
@@ -84,12 +84,6 @@ impl Default for SummaryConfig {
     }
 }
 
-impl Default for EmailConfig {
-    fn default() -> Self {
-        Self { resend_api_key: String::new(), from: String::new(), to: String::new() }
-    }
-}
-
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self { path: default_db_path() }
@@ -119,9 +113,9 @@ impl Config {
     }
 
     pub fn expand_path(path: &str) -> PathBuf {
-        if path.starts_with("~/") {
+        if let Some(stripped) = path.strip_prefix("~/") {
             if let Some(home) = dirs::home_dir() {
-                return home.join(&path[2..]);
+                return home.join(stripped);
             }
         }
         PathBuf::from(path)
@@ -140,14 +134,3 @@ impl Config {
     }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            capture: CaptureConfig::default(),
-            ollama: OllamaConfig::default(),
-            summary: SummaryConfig::default(),
-            email: EmailConfig::default(),
-            database: DatabaseConfig::default(),
-        }
-    }
-}

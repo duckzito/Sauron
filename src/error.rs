@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+#[allow(dead_code)]
 #[derive(Error, Debug)]
 pub enum SauronError {
     #[error("Config error: {0}")]
@@ -24,4 +25,5 @@ pub enum SauronError {
     Email(String),
 }
 
+#[allow(dead_code)]
 pub type Result<T> = std::result::Result<T, SauronError>;
