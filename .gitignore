@@ -2,3 +2,5 @@
 *.db
 *.pid
 *.log
+menubar/.build/
+menubar/SauronMenu.app/
