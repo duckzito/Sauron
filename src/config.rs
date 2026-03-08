@@ -1,3 +1,4 @@
+use chrono::Timelike;
 use serde::Deserialize;
 use std::path::PathBuf;
 
@@ -21,6 +22,10 @@ pub struct CaptureConfig {
     pub interval_minutes: u64,
     #[serde(default = "default_screenshot_dir")]
     pub screenshot_dir: String,
+    #[serde(default = "default_active_start")]
+    pub active_hours_start: String,
+    #[serde(default = "default_active_end")]
+    pub active_hours_end: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -77,6 +82,8 @@ pub struct DatabaseConfig {
 
 fn default_interval() -> u64 { 3 }
 fn default_screenshot_dir() -> String { "~/sauron/screenshots".into() }
+fn default_active_start() -> String { "09:00".into() }
+fn default_active_end() -> String { "18:00".into() }
 fn default_ollama_url() -> String { "http://localhost:11434".into() }
 fn default_vision_model() -> String { "llava".into() }
 fn default_text_model() -> String { "llama3.2".into() }
@@ -86,7 +93,12 @@ fn default_db_path() -> String { "~/sauron/sauron.db".into() }
 
 impl Default for CaptureConfig {
     fn default() -> Self {
-        Self { interval_minutes: default_interval(), screenshot_dir: default_screenshot_dir() }
+        Self {
+            interval_minutes: default_interval(),
+            screenshot_dir: default_screenshot_dir(),
+            active_hours_start: default_active_start(),
+            active_hours_end: default_active_end(),
+        }
     }
 }
 
@@ -149,6 +161,31 @@ impl Config {
 
     pub fn db_path(&self) -> PathBuf {
         Self::expand_path(&self.database.path)
+    }
+
+    pub fn pause_file() -> PathBuf {
+        Self::config_dir().join("sauron.paused")
+    }
+
+    pub fn is_paused() -> bool {
+        Self::pause_file().exists()
+    }
+
+    pub fn is_within_active_hours(&self) -> bool {
+        let now = chrono::Local::now();
+        let current_minutes = now.hour() as u32 * 60 + now.minute() as u32;
+
+        let start = Self::parse_time_minutes(&self.capture.active_hours_start).unwrap_or(0);
+        let end = Self::parse_time_minutes(&self.capture.active_hours_end).unwrap_or(24 * 60);
+
+        current_minutes >= start && current_minutes < end
+    }
+
+    fn parse_time_minutes(time_str: &str) -> Option<u32> {
+        let parts: Vec<&str> = time_str.split(':').collect();
+        let h: u32 = parts.first()?.parse().ok()?;
+        let m: u32 = parts.get(1)?.parse().ok()?;
+        Some(h * 60 + m)
     }
 }
 

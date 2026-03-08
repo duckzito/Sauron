@@ -10,6 +10,11 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{interval_at, Duration, Instant};
 
+extern "C" {
+    fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
+}
+
 pub struct Daemon {
     config: Config,
 }
@@ -20,6 +25,8 @@ impl Daemon {
     }
 
     pub async fn run(&self) -> anyhow::Result<()> {
+        self.check_screen_permission()?;
+
         let db = Arc::new(Mutex::new(Database::open(&self.config.db_path())?));
         let capturer = Capturer::new(self.config.screenshot_dir());
         let processor = Processor::new(
@@ -50,10 +57,26 @@ impl Daemon {
 
         // Spawn screenshot capture loop
         let db_capture = db.clone();
+        let capture_config = self.config.clone();
         let capture_handle = tokio::spawn(async move {
             let mut timer = interval_at(Instant::now() + capture_interval, capture_interval);
             loop {
                 timer.tick().await;
+
+                if Config::is_paused() {
+                    tracing::debug!("Captures paused, skipping");
+                    continue;
+                }
+
+                if !capture_config.is_within_active_hours() {
+                    tracing::debug!(
+                        "Outside active hours ({}-{}), skipping",
+                        capture_config.capture.active_hours_start,
+                        capture_config.capture.active_hours_end
+                    );
+                    continue;
+                }
+
                 match capturer.take_screenshot() {
                     Ok((captured_at, file_path)) => {
                         let file_path_str = file_path.to_string_lossy().to_string();
@@ -182,6 +205,27 @@ impl Daemon {
         // Clean up PID file on exit
         Self::remove_pid();
         tracing::info!("Sauron stopped");
+
+        Ok(())
+    }
+
+    fn check_screen_permission(&self) -> anyhow::Result<()> {
+        let granted = unsafe { CGPreflightScreenCaptureAccess() };
+        if granted {
+            tracing::info!("Screen recording permission granted");
+            return Ok(());
+        }
+
+        tracing::warn!("Screen recording permission not granted, requesting access...");
+        let requested = unsafe { CGRequestScreenCaptureAccess() };
+
+        if !requested {
+            anyhow::bail!(
+                "Screen recording permission denied. \
+                 Please grant access in System Settings → Privacy & Security → Screen Recording, \
+                 then restart sauron."
+            );
+        }
 
         Ok(())
     }
