@@ -1,11 +1,12 @@
 mod capture;
 mod cli;
 mod config;
+mod daemon;
 mod db;
+mod email;
 mod error;
 mod processor;
 mod summarizer;
-mod email;
 
 use clap::Parser;
 use cli::{Cli, Commands};
