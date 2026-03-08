@@ -4,6 +4,8 @@ mod config;
 mod db;
 mod error;
 mod processor;
+mod summarizer;
+mod email;
 
 use clap::Parser;
 use cli::{Cli, Commands};
