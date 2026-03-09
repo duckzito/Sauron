@@ -39,13 +39,32 @@ impl Database {
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );"
         )?;
+
+        // Add display_label column if it doesn't exist
+        let has_column: bool = self.conn
+            .prepare("PRAGMA table_info(screenshots)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(|r| r.ok())
+            .any(|name| name == "display_label");
+
+        if !has_column {
+            self.conn.execute_batch(
+                "ALTER TABLE screenshots ADD COLUMN display_label TEXT DEFAULT 'main'"
+            )?;
+        }
+
         Ok(())
     }
 
-    pub fn insert_screenshot(&self, captured_at: &str, file_path: &str) -> anyhow::Result<i64> {
+    pub fn insert_screenshot(
+        &self,
+        captured_at: &str,
+        file_path: &str,
+        display_label: &str,
+    ) -> anyhow::Result<i64> {
         self.conn.execute(
-            "INSERT INTO screenshots (captured_at, file_path) VALUES (?1, ?2)",
-            [captured_at, file_path],
+            "INSERT INTO screenshots (captured_at, file_path, display_label) VALUES (?1, ?2, ?3)",
+            [captured_at, file_path, display_label],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -64,13 +83,18 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_day_summaries(&self, date: &str) -> anyhow::Result<Vec<(String, String)>> {
+    /// Returns (captured_at, summary, display_label) for a given date.
+    pub fn get_day_summaries(&self, date: &str) -> anyhow::Result<Vec<(String, String, String)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT captured_at, summary FROM screenshots WHERE captured_at LIKE ?1 AND summary IS NOT NULL ORDER BY captured_at"
+            "SELECT captured_at, summary, COALESCE(display_label, 'main') FROM screenshots WHERE captured_at LIKE ?1 AND summary IS NOT NULL ORDER BY captured_at"
         )?;
         let pattern = format!("{}%", date);
         let rows = stmt.query_map([pattern], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })?;
         let mut results = Vec::new();
         for row in rows {

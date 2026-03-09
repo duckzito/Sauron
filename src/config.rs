@@ -26,6 +26,9 @@ pub struct CaptureConfig {
     pub active_hours_start: String,
     #[serde(default = "default_active_end")]
     pub active_hours_end: String,
+    /// Optional list of display indices to capture. None = capture all.
+    #[serde(default)]
+    pub monitors: Option<Vec<usize>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -98,6 +101,7 @@ impl Default for CaptureConfig {
             screenshot_dir: default_screenshot_dir(),
             active_hours_start: default_active_start(),
             active_hours_end: default_active_end(),
+            monitors: None,
         }
     }
 }

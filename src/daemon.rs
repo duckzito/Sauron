@@ -77,34 +77,43 @@ impl Daemon {
                     continue;
                 }
 
-                match capturer.take_screenshot() {
-                    Ok((captured_at, file_path)) => {
-                        let file_path_str = file_path.to_string_lossy().to_string();
-                        let id = {
-                            let db = db_capture.lock().await;
-                            match db.insert_screenshot(&captured_at, &file_path_str) {
-                                Ok(id) => id,
-                                Err(e) => {
-                                    tracing::error!("DB insert failed: {}", e);
-                                    continue;
-                                }
-                            }
-                        };
-                        // Lock is dropped here before the await point
-
-                        // Process with Ollama (no mutex held across this await)
-                        let result = processor.process_screenshot(&file_path).await;
-                        match result {
-                            Ok((summary, model, method)) => {
+                match capturer.take_screenshots(&capture_config.capture) {
+                    Ok(captures) => {
+                        // Process each display's screenshot sequentially (GPU can only do one at a time)
+                        for capture in captures {
+                            let file_path_str = capture.file_path.to_string_lossy().to_string();
+                            let id = {
                                 let db = db_capture.lock().await;
-                                if let Err(e) =
-                                    db.update_screenshot_summary(id, &summary, &model, &method)
-                                {
-                                    tracing::error!("DB update failed: {}", e);
+                                match db.insert_screenshot(
+                                    &capture.captured_at,
+                                    &file_path_str,
+                                    &capture.display_label,
+                                ) {
+                                    Ok(id) => id,
+                                    Err(e) => {
+                                        tracing::error!("DB insert failed: {}", e);
+                                        continue;
+                                    }
                                 }
-                            }
-                            Err(e) => {
-                                tracing::error!("Processing failed: {}", e);
+                            };
+                            // Lock is dropped here before the await point
+
+                            // Process with Ollama (no mutex held across this await)
+                            let result = processor
+                                .process_screenshot(&capture.file_path, &capture.display_label)
+                                .await;
+                            match result {
+                                Ok((summary, model, method)) => {
+                                    let db = db_capture.lock().await;
+                                    if let Err(e) =
+                                        db.update_screenshot_summary(id, &summary, &model, &method)
+                                    {
+                                        tracing::error!("DB update failed: {}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!("Processing failed for {}: {}", capture.display_label, e);
+                                }
                             }
                         }
                     }

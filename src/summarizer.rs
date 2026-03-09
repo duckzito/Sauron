@@ -24,7 +24,7 @@ impl Summarizer {
     pub async fn generate_daily_summary(
         &self,
         date: &str,
-        entries: &[(String, String)], // (captured_at, summary)
+        entries: &[(String, String, String)], // (captured_at, summary, display_label)
     ) -> anyhow::Result<(String, PathBuf)> {
         if entries.is_empty() {
             anyhow::bail!("No entries to summarize for {}", date);
@@ -32,13 +32,13 @@ impl Summarizer {
 
         let timeline = entries
             .iter()
-            .map(|(time, summary)| {
+            .map(|(time, summary, display_label)| {
                 let time_short = time
                     .split('T')
                     .nth(1)
                     .and_then(|t| t.get(..5))
                     .unwrap_or(time);
-                format!("[{}] {}", time_short, summary)
+                format!("[{}][{}] {}", time_short, display_label, summary)
             })
             .collect::<Vec<_>>()
             .join("\n");

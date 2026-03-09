@@ -27,9 +27,10 @@ impl Processor {
     pub async fn process_screenshot(
         &self,
         image_path: &Path,
+        display_label: &str,
     ) -> anyhow::Result<(String, String, String)> {
         // Try vision model first
-        match self.try_vision(image_path).await {
+        match self.try_vision(image_path, display_label).await {
             Ok(summary) => {
                 tracing::info!("Vision model succeeded");
                 return Ok((summary, self.vision_model.clone(), "vision".into()));
@@ -45,14 +46,19 @@ impl Processor {
         Ok((summary, self.text_model.clone(), "ocr_fallback".into()))
     }
 
-    async fn try_vision(&self, image_path: &Path) -> anyhow::Result<String> {
+    async fn try_vision(&self, image_path: &Path, display_label: &str) -> anyhow::Result<String> {
         let image_bytes = tokio::fs::read(image_path).await?;
         let image_b64 = base64::engine::general_purpose::STANDARD.encode(&image_bytes);
+
+        let prompt = format!(
+            "{} This screenshot is from monitor '{}'.",
+            SCREENSHOT_PROMPT, display_label
+        );
 
         let url = format!("{}/api/generate", self.base_url);
         let body = json!({
             "model": self.vision_model,
-            "prompt": SCREENSHOT_PROMPT,
+            "prompt": prompt,
             "images": [image_b64],
             "stream": false,
         });
