@@ -37,7 +37,12 @@ pub fn install() -> anyhow::Result<()> {
     );
 
     std::fs::create_dir_all(plist_path.parent().unwrap())?;
-    std::fs::write(&plist_path, plist_content)?;
+    std::fs::write(&plist_path, &plist_content)?;
+
+    // Unload first in case the service is already loaded (re-install scenario)
+    let _ = std::process::Command::new("launchctl")
+        .args(["unload", plist_path.to_str().unwrap()])
+        .status();
 
     let status = std::process::Command::new("launchctl")
         .args(["load", plist_path.to_str().unwrap()])
@@ -110,7 +115,12 @@ fn install_menubar() -> anyhow::Result<()> {
         binary.display(),
     );
 
-    std::fs::write(&menubar_plist, plist_content)?;
+    std::fs::write(&menubar_plist, &plist_content)?;
+
+    // Unload first in case the service is already loaded (re-install scenario)
+    let _ = std::process::Command::new("launchctl")
+        .args(["unload", menubar_plist.to_str().unwrap()])
+        .status();
 
     let status = std::process::Command::new("launchctl")
         .args(["load", menubar_plist.to_str().unwrap()])
