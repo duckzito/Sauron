@@ -4,3 +4,4 @@
 *.log
 menubar/.build/
 menubar/SauronMenu.app/
+.worktrees/
