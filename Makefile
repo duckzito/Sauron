@@ -22,6 +22,7 @@ install: build
 	sudo cp target/release/sauron $(BINARY_INSTALL_DIR)/sauron
 	sudo codesign --force --sign - $(BINARY_INSTALL_DIR)/sauron
 	@echo "Installing menu bar app..."
+	sudo rm -rf $(APP_INSTALL_DIR)/$(APP_BUNDLE)
 	sudo cp -R menubar/$(APP_BUNDLE) $(APP_INSTALL_DIR)/$(APP_BUNDLE)
 	sudo codesign --force --sign - $(APP_INSTALL_DIR)/$(APP_BUNDLE)
 	@echo "Setting up launchd services..."
