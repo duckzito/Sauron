@@ -1,10 +1,22 @@
 use crate::config::Config;
+use crate::daemon::{is_sauron_process, Daemon};
 use std::path::PathBuf;
 
 const PLIST_LABEL: &str = "com.sauron.agent";
 const MENUBAR_PLIST_LABEL: &str = "com.sauron.menubar";
 
 pub fn install() -> anyhow::Result<()> {
+    // Kill any stale sauron daemon before reinstalling
+    if let Some(pid) = Daemon::read_pid() {
+        if is_sauron_process(pid) {
+            tracing::info!("Stopping existing sauron daemon (PID {}) before reinstall", pid);
+            unsafe { libc::kill(pid as i32, libc::SIGTERM); }
+            // Wait briefly for the process to exit
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            Daemon::remove_pid();
+        }
+    }
+
     let plist_path = plist_path();
     let binary_path = std::env::current_exe()?;
 

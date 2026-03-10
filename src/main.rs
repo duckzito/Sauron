@@ -12,24 +12,10 @@ mod summarizer;
 use clap::Parser;
 use cli::{Cli, Commands};
 use config::Config;
-use daemon::Daemon;
+use daemon::{is_sauron_process, Daemon};
 use db::Database;
 use email::Mailer;
 use summarizer::Summarizer;
-
-/// Check whether the given PID belongs to a sauron process by inspecting
-/// the process command name via `ps`. Returns `true` only when `ps`
-/// reports a command that contains "sauron".
-fn is_sauron_process(pid: u32) -> bool {
-    std::process::Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "comm="])
-        .output()
-        .map(|output| {
-            let comm = String::from_utf8_lossy(&output.stdout);
-            comm.to_lowercase().contains("sauron")
-        })
-        .unwrap_or(false)
-}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

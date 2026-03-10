@@ -5,10 +5,24 @@ use crate::email::Mailer;
 use crate::processor::Processor;
 use crate::summarizer::Summarizer;
 
-use chrono::Local;
+use chrono::{Local, Timelike};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{interval_at, Duration, Instant};
+
+/// Check whether the given PID belongs to a sauron process by inspecting
+/// the process command name via `ps`. Returns `true` only when `ps`
+/// reports a command that contains "sauron".
+pub fn is_sauron_process(pid: u32) -> bool {
+    std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "comm="])
+        .output()
+        .map(|output| {
+            let comm = String::from_utf8_lossy(&output.stdout);
+            comm.to_lowercase().contains("sauron")
+        })
+        .unwrap_or(false)
+}
 
 extern "C" {
     fn CGPreflightScreenCaptureAccess() -> bool;
@@ -25,6 +39,20 @@ impl Daemon {
     }
 
     pub async fn run(&self) -> anyhow::Result<()> {
+        // Single-instance guard: abort if another sauron daemon is already running
+        if let Some(existing_pid) = Self::read_pid() {
+            if existing_pid != std::process::id() && is_sauron_process(existing_pid) {
+                anyhow::bail!(
+                    "Another sauron instance is already running (PID {}). \
+                     Stop it first with `sauron stop`.",
+                    existing_pid
+                );
+            }
+        }
+
+        // Write PID file immediately after guard to minimize race window
+        Self::write_pid()?;
+
         self.check_screen_permission()?;
 
         let db = Arc::new(Mutex::new(Database::open(&self.config.db_path())?));
@@ -44,9 +72,6 @@ impl Daemon {
             self.config.email.from.clone(),
             self.config.email.to.clone(),
         );
-
-        // Write PID file
-        Self::write_pid()?;
 
         tracing::info!(
             "Sauron started — capturing every {} minutes",
@@ -124,17 +149,36 @@ impl Daemon {
             }
         });
 
-        // Spawn daily summary loop
+        // Spawn daily summary loop — checks every 30s instead of sleeping for hours
         let db_summary = db.clone();
         let daily_time = self.config.summary.daily_time.clone();
         let summary_handle = tokio::spawn(async move {
-            loop {
-                // Sleep until the target time
-                let sleep_dur = Self::duration_until(&daily_time);
-                tracing::info!("Next daily summary in {} seconds", sleep_dur.as_secs());
-                tokio::time::sleep(sleep_dur).await;
+            let (target_h, target_m) = Self::parse_daily_time(&daily_time);
+            let mut last_summary_date: Option<String> = None;
+            let mut retry_count: u32 = 0;
+            const MAX_RETRIES: u32 = 5;
+            let mut check_interval = tokio::time::interval(Duration::from_secs(30));
 
-                let today = Local::now().format("%Y-%m-%d").to_string();
+            tracing::info!("Summary loop started, target time {}:{:02}", target_h, target_m);
+
+            loop {
+                check_interval.tick().await;
+
+                let now = Local::now();
+                let today = now.format("%Y-%m-%d").to_string();
+                let current_h = now.hour();
+                let current_m = now.minute();
+
+                // Skip if we already generated a summary for today
+                if last_summary_date.as_deref() == Some(today.as_str()) {
+                    continue;
+                }
+
+                // Only trigger when current time is at or past the target
+                if current_h < target_h || (current_h == target_h && current_m < target_m) {
+                    continue;
+                }
+
                 tracing::info!("Generating daily summary for {}", today);
 
                 let entries = {
@@ -150,6 +194,7 @@ impl Daemon {
 
                 if entries.is_empty() {
                     tracing::info!("No summaries for today, skipping");
+                    last_summary_date = Some(today.clone());
                     continue;
                 }
 
@@ -182,15 +227,27 @@ impl Daemon {
                                 }
                             }
                         }
+
+                        last_summary_date = Some(today.clone());
+                        retry_count = 0;
+                        tracing::info!("Daily summary generated for {}", today);
                     }
                     Err(e) => {
-                        tracing::error!("Failed to generate daily summary: {}", e);
+                        retry_count += 1;
+                        tracing::error!(
+                            "Failed to generate daily summary (attempt {}/{}): {}",
+                            retry_count, MAX_RETRIES, e
+                        );
+                        if retry_count >= MAX_RETRIES {
+                            tracing::error!(
+                                "Giving up on daily summary for {} after {} attempts",
+                                today, MAX_RETRIES
+                            );
+                            last_summary_date = Some(today.clone());
+                            retry_count = 0;
+                        }
                     }
                 }
-
-                // Sleep briefly before recalculating duration_until to avoid
-                // edge cases where we're still at the target minute
-                tokio::time::sleep(Duration::from_secs(60)).await;
             }
         });
 
@@ -239,27 +296,12 @@ impl Daemon {
         Ok(())
     }
 
-    fn duration_until(time_str: &str) -> Duration {
+    fn parse_daily_time(time_str: &str) -> (u32, u32) {
         let parts: Vec<u32> = time_str.split(':').filter_map(|s| s.parse().ok()).collect();
-        let (target_h, target_m) = (
+        (
             parts.first().copied().unwrap_or(23),
             parts.get(1).copied().unwrap_or(59),
-        );
-
-        let now = Local::now();
-        let today_target = now
-            .date_naive()
-            .and_hms_opt(target_h, target_m, 0)
-            .unwrap();
-
-        let target = if today_target > now.naive_local() {
-            today_target
-        } else {
-            today_target + chrono::Duration::days(1)
-        };
-
-        let diff = target - now.naive_local();
-        Duration::from_secs(diff.num_seconds().max(1) as u64)
+        )
     }
 
     fn write_pid() -> anyhow::Result<()> {
