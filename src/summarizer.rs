@@ -47,7 +47,8 @@ impl Summarizer {
             "Based on these chronological screen activity summaries from {}, \
             create a concise daily activity log in markdown format. \
             Group related activities, note time ranges, highlight key accomplishments. \
-            Use headers and bullet points.\n\n{}",
+            Use headers with emoji icons (e.g. ## 🛠 Software Development) and bullet points. \
+            Do not include a top-level title header; one will be added automatically.\n\n{}",
             date, timeline
         );
 
